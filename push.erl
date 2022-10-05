@@ -2,75 +2,54 @@
 -import(lists,[nth/2]).
 -import(topo,[createLine/1,createFull/1,create3D/1]).
 -import(topo,[printCons/1,printCons3D/1,flatten/1]).
--export([start/1,nd/3,ndIsDone/0]).
+-export([start/1,nd/4,ndIsDone/1]).
 
-nd(S,W, 3) -> 
-    io:format("~p is done~n",[self()]),
-    areYouDone ! done,
-    nd(S,W,3);
-    % receive
-    %     count -> io:format("~p ~p~n", [self(),1])
-    % end;
-nd(S, W, C) ->
-    io:format("~p : ~p~n",[self(),C]),
+nd(_,_, 3, Ayd) -> 
+    Ayd ! done;
+    
+nd(S, W, C, Ayd) ->
+    % io:format("~p : ~p~n",[self(),C]),
     receive
-        {link, Pid} -> 
+        {link, Pid} ->
             link(Pid),
-            nd(S, W, C);
+            nd(S, W, C, Ayd);
         {msg, {S1, W1}} ->
-            timer:sleep(30),
+            % timer:sleep(30),
             SNew = S+S1, WNew = W+W1,
             {links,Nbs} = process_info(self(), links),
-            io:format("~p ~p~n",[self(), Nbs]),
+            % io:format("~p ~p~n",[self(), Nbs]),
             if
-                Nbs==[] -> areYouDone ! done;
+                Nbs==[] ->
+                    
+                    Ayd ! done;
                 true ->
                     K = rand:uniform(length(Nbs)),
-                    timer:sleep(10),
+                    % timer:sleep(10),
                     nth(K,Nbs) ! {msg,{SNew/2,WNew/2}},
-                    if 
-                        SNew/WNew - S/W =< 0.00001 -> nd(SNew/2, WNew/2, C+1);
-                        true -> nd(SNew/2, WNew/2, 0)
+                    if
+                        SNew/WNew - S/W =< 0.0000000001 -> nd(SNew/2, WNew/2, C+1, Ayd);
+                        true -> nd(SNew/2, WNew/2, 0, Ayd)
                     end
-            end;
-        count ->
-            io:format("~p ~p~n", [self(),S/W]),
-            exit("Done")
+            end
     end.
 
-% isProcessAlive(NodeList) ->
-%     [io:format("~p~n",[is_process_alive(X)]) || X<-NodeList].
-% ndIsDone(0,_)-> 
-%     receive
-%         done ->
-%             io:format("O processes remain~n")
-%     end;
-% ndIsDone(1,NodeList)-> 
-%     pushPid ! stop,
-%     receive
-%         done ->
-%             % isProcessAlive(NodeList),
-%             io:format("One nd is done~n")
-%     end,
-%     ndIsDone(0,NodeList);
-% ndIsDone(-1,NodeList) -> ndIsDone(0,NodeList);
-ndIsDone() ->
+ndIsDone(false) ->
     receive
         done ->
-            {_, Time1} = statistics(runtime),
-            {_, Time2} = statistics(wall_clock),
-            U1 = Time1,
-            U2 = Time2,
-            % [X ! count || X <- FlatList],
-            io:format("Time elapsed : ~p (~p)~n", [U1,U2]),
-            timer:sleep(100)
+            done
     end,
-    ndIsDone().
+    ndIsDone(false);
+ndIsDone(true) ->
+    receive
+        done -> pushPid ! done
+            
+    end,
+    ndIsDone(false).
     % ndIsDone(N-1,NodeList).
 
-createNodes1D(Arr, 0, _, _) -> Arr;
-createNodes1D(Arr, Len, Mod,[C]) ->
-    createNodes1D([spawn(Mod,nd,[C,1,0])|Arr], Len-1, Mod, [C+1]).
+createNodes1D(Arr, 0, _, _,_) -> Arr;
+createNodes1D(Arr, Len, Mod,[C],Ayd) ->
+    createNodes1D([spawn(Mod,nd,[C,1,0,Ayd])|Arr], Len-1, Mod, [C+1],Ayd).
 
 % createNodes2D(Arr, _, 0, _, _) -> Arr;
 % createNodes2D(Arr, N, Len, Mod, Paras) ->
@@ -81,25 +60,26 @@ createNodes1D(Arr, Len, Mod,[C]) ->
 %     createNodes3D([createNodes2D([],N,N,Mod,Paras)|Arr],N, Len-1, Mod, Paras).
 
 start(N) ->
-    register(pushPid, self()),
-    NodeList = createNodes1D([],N, push, [1]),
-    register(areYouDone, spawn(push, ndIsDone,[])),
-    io:format("~p~n",[NodeList]),
-    createLine(NodeList),
-    timer:sleep(1),
-    printCons(NodeList),
-    % createLine(NodeList),
     
-    % % createFull(NodeList),
-    % timer:sleep(100),
-    % % printCons(NodeList),
-    statistics(runtime),
-    statistics(wall_clock),
+    register(pushPid, self()),
+    Ayd = spawn(push, ndIsDone,[true]),
+    NodeList = createNodes1D([],N, push, [1], Ayd),
+    % io:format("~p~n",[NodeList]),
+    createLine(NodeList),
+    io:format("~p~n",[statistics(wall_clock)]),
     FlatList = flatten(NodeList),
     io:format("~p~n",[FlatList]),
     nth(rand:uniform(length(FlatList)),FlatList) ! {msg, {0,0}},
-    
-
-    unregister(pushPid),
-    unregister(areYouDone),
-    done.
+    receive 
+        done -> 
+            % {_, Time1} = statistics(runtime),
+            % {_, Time2} = statistics(wall_clock),
+            io:format("~p~n",[statistics(wall_clock)]),
+            % U1 = Time1,
+            % U2 = Time2,
+            % [X ! count || X <- FlatList],
+            % io:format("Time elapsed : ~p ~n", [U2]),
+            % timer:sleep(100)
+            unregister(pushPid)
+    end.
+    % unregister(areYouDone),
